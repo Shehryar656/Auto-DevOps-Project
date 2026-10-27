@@ -1,5 +1,4 @@
-
-name: Deploy AutoDevOps Website
+﻿name: Deploy AutoDevOps Website
 
 on:
   push:
@@ -35,6 +34,6 @@ jobs:
         with:
           path: autodevops/app
 
-      - name: Deploy to GitHub Pages
+      - name: Deploy website
         id: deployment
         uses: actions/deploy-pages@v4
