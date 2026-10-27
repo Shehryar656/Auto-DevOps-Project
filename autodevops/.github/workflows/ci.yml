@@ -1,0 +1,80 @@
+name: AutoDevOps CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autodevops-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-scan:
+    name: Build, test and scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Show tool versions
+        run: |
+          git --version
+          docker --version
+          python3 --version
+
+      - name: Build container image
+        run: docker build --pull -t autodevops-demo:${{ github.sha }} .
+
+      - name: Start application container
+        run: |
+          docker run -d --name autodevops-ci \
+            -p 18080:8080 \
+            autodevops-demo:${{ github.sha }}
+
+      - name: Wait for application health
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18080/health; then
+              echo
+              echo "Health endpoint passed."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Health check failed; container logs follow:"
+          docker logs autodevops-ci
+          exit 1
+
+      - name: Run automated health test
+        run: python3 tests/test_health.py
+
+      - name: Verify dashboard page
+        run: |
+          curl --fail --silent http://127.0.0.1:18080/ \
+            | grep -q "Engineering Control Center"
+          echo "Dashboard page passed."
+
+      - name: Scan container image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: autodevops-demo:${{ github.sha }}
+          format: table
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          exit-code: '0'
+
+      - name: Always show container logs on failure
+        if: failure()
+        run: docker logs autodevops-ci || true
+
+      - name: Clean up test container
+        if: always()
+        run: docker rm -f autodevops-ci || true
